@@ -1,0 +1,794 @@
+---
+title: "Developing and Evaluating a Predictive Classification Model for Diabetes Diagnosis"
+author: "Nicole Rodriguez"
+date: '05/02/25'
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    code_folding: hide
+    fig_caption: true
+    df_print: kable
+    theme: lumen
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+# Introduction
+Diabetes is a chronic health condition that presents significant challenges in both diagnosis and long-term management. Despite its complexity, certain demographic, medical, and clinical indicators can offer valuable insights into an individual's likelihood of developing the disease. This project leverages the [Diabetes Dataset](https://www.kaggle.com/datasets/ehababoelnaga/diabetes-dataset/data) available on Kaggle, which provides a collection of patient data including demographic profiles, medical histories, and clinical measurements. 
+
+By analyzing these variables, the objective is to identify key predictors of diabetes and build a classification model capable of determining whether an individual is likely to have the condition.
+
+* * *
+  
+# Data
+## Load Libraries and Packages
+
+The [Diabetes Dataset](https://www.kaggle.com/datasets/ehababoelnaga/diabetes-dataset/data) from Kaggle divides the data into the following csv files:
+
+- Training.csv
+- Testing.csv
+
+I combined both files for pre-processing and proper splitting later within this analysis.
+
+```{r message=FALSE, warning=FALSE}
+# Load required packages
+if (!require("readr")) 
+  install.packages("readr")
+if (!require("tidyverse")) 
+  install.packages("tidyverse")
+if (!require("ggplot2")) 
+  install.packages("ggplot2")
+if (!require("car")) 
+  install.packages("car")
+if (!require("caret")) 
+  install.packages("caret")
+
+library(readr) # Read data files
+library(tidyverse) # Data packages
+library(ggplot2)# Data visualization
+library(car)# Statistical analysis 
+library(caret)# Data modeling/training/evaluation
+
+```
+
+## Description of Data & Variables
+
+The [Diabetes Dataset](https://www.kaggle.com/datasets/ehababoelnaga/diabetes-dataset/data) contains 9 key features that capture a wide range of demographic, medical, and clinical information across a large number of patients. These features include:
+
+- Pregnancies: Total Number of pregnancies
+- Glucose: Blood glucose levels
+- BloodPressure: Blood pressure readings
+- SkinThickness: Thickness of the skin
+- Insulin: Blood insulin levels
+- BMI: Body mass index
+- DiabetesPedigreeFunction: Diabetes percentage
+- Age: Individuals age
+- Outcome
+  - Diabetes diagnosis outcome
+    - 0 = NO
+    - 1 = YES
+
+The dataset is divided into two parts: a training set with 2,460 observations and a testing set with 308 observations, totaling 2,768 records for analysis.
+
+## Load Data 
+
+After installing and loading the necessary packages, the two CSV files from the diabetes dataset are imported using **read_csv()** from the *readr* package. To facilitate data analysis and processing, the datasets are then merged using **bind_rows()** from the *dplyr* package.
+
+```{r message=FALSE}
+# Load csv files
+train_data <- read_csv("Training.csv")
+test_data <- read_csv("Testing.csv")
+# Combine files
+combined_data <- bind_rows(train_data, test_data)
+# File dimensions
+dim(train_data)
+dim(test_data)
+dim(combined_data)
+```
+
+```{r}
+# View data statistics 
+glimpse(train_data)
+summary(train_data)
+```
+
+* * *
+
+# Data Analysis
+## Charts/Graphs
+
+```{r}
+# Pivot longer training data for visualization
+expand_data <- combined_data %>%
+  pivot_longer(cols = -Outcome, 
+               names_to = "variable", values_to = "value")
+
+# Visualize data in relation to the target variable outcome
+ggplot(expand_data, aes(x = variable, y = value, fill = variable)) +
+  # Bar plot
+  geom_col() +
+  # Adjust labels
+  labs(title = "Continuous Variables vs Outcome", x = "Variable", y = "Value") +
+  # Color Palette
+  scale_fill_brewer(palette = "RdYlBu") +
+
+  # Add theme
+  theme_minimal() +
+  # Adjust x-axis variables
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The barplot above illustrates the distribution of continuous variables in relation to the target variable, **Outcome**. To prepare the data for visualization, the *tidyverse* package was used to reshape the dataset, and *ggplot2* was employed to generate the barplot. The top three continuous variables that show higher values among individuals with a positive diabetes outcome are:
+
+- Glucose
+
+- Insulin
+
+- Blood Pressure
+
+Elevated levels in these variables are commonly associated with an increased risk of having or developing diabetes.
+
+```{r}
+# All variables except outcome 
+contin_vars <- combined_data %>%
+  select(-Outcome)
+
+# Correlation: outcome variable and other variables
+outcome_corr <- cor(combined_data$Outcome, contin_vars)
+print(outcome_corr)
+
+# Positive correlations
+positive_corr <- names(outcome_corr[,outcome_corr > 0])
+
+# Moderate positive correlations
+moderate_pos_corr <- names(outcome_corr[,outcome_corr > 0.3 & outcome_corr < 0.7])
+
+# Negative correlations
+negative_corr <- names(outcome_corr[,outcome_corr < 0])
+print(negative_corr)
+
+
+# Results
+cat("The following variables had a positive correlation with the outcome of diabetes:\n",
+paste("- ", positive_corr, "\n"))
+
+cat("The following variables had a moderate positve correlation with the outcome of diabetes:\n",
+paste("- ", moderate_pos_corr, "\n"))
+
+
+
+# Convert correlation matrix to a data frame
+corr_df <- as.data.frame(outcome_corr)
+# Obtain rownames
+corr_df$variable <- rownames(corr_df)
+# Reshape df for visualization
+corr_df_var <- pivot_longer(corr_df, 
+                            cols = -variable,
+                            names_to = "variable_name",
+                            values_to = "correlation")
+
+# Bar plot illustrating outcome correlation with other variables
+ggplot(corr_df_var, aes(x = variable_name, y = correlation, fill = correlation)) +
+  # Bar plot
+  geom_bar(stat = "identity") +
+  # Update labels
+  labs(title = "Variable Correlation vs Diabetes Outcome", x = "Variable", y = "Correlation") +
+  # Adjust x axis text
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   scale_fill_gradient2(low = "skyblue", mid = "lightgreen", high = "darkblue", midpoint = 0.25)
+
+```
+
+Correlation values between each feature and the Outcome variable were computed using the cor() function. As shown in the correlation plot above, the four variables with the strongest positive correlation to diabetes diagnosis are:
+
+- Glucose: Correlation: 0.44
+
+- BMI: Correlation: 0.30
+
+- Pregnancies: Correlation: 0.22
+
+- Age: Correlation: 0.22
+
+These results suggest that as the values of these individual variables increase, the likelihood of a diabetes diagnosis also rises. It’s important to note that these correlations reflect individual relationships with the outcome and do not account for interactions among variables.
+
+## Continuous Feature Outliers
+```{r warning=FALSE, message=FALSE}
+# Detect outliers with IQR
+# Calculate IQR
+q1 <- apply(contin_vars, 2, quantile, probs = 0.25)
+q3 <- apply(contin_vars, 2, quantile, probs = 0.75)
+iqr <- q3 - q1
+
+# Identify outliers
+lwr <- q1 - 1.5 * iqr
+upr <- q3 + 1.5 * iqr
+outliers <- combined_data %>%
+  filter(across(everything(), ~ . >= lwr & . <= upr))
+
+# Remove outliers
+cleaned_data <- combined_data %>%
+  anti_join(outliers)
+
+# Reshape for visualization plot
+cleaned_data_long <- tidyr::pivot_longer(cleaned_data, everything(), 
+                                       names_to = "variable", 
+                                       values_to = "value")
+
+# Visualize with density plot
+ggplot(cleaned_data_long, aes(x = value, fill = variable)) +
+  # Density plot
+  geom_density(alpha = 0.5) +
+  # Wrap facets by variable
+  facet_wrap(~ variable, scales = "free") +
+    # Manual colors
+  scale_fill_manual(values = c(
+    "Age" = "#00B4D8",
+    "BloodPressure" = "#0077B6",
+    "BMI" = "#0096C7",
+    "DiabetesPedigreeFunction" = "#ADE8F4",
+    "Glucose" = "#03045E",
+    "Insulin" = "#023E8A",
+    "Pregnancies" = "#90E0EF",
+    "SkinThickness" = "#48CAE4"
+  )) +
+  # Update labels
+  labs(title = "Density Plot of Variables (Outliers Removed)", x = "Value", y = "Density") +
+  # Theme
+  theme_minimal()
+```
+
+In the density plot shown above, we can see that the removal of outliers changed the density of some of the variables within the data set. We can the distribution of data within each variable more reliably with the removal of these outliers. The outcome variables, is categorical so that's why there's a large, u-shaped dip within it's density plot. 
+
+
+## Correlation | Collinearity | Chi-Squared Analysis
+```{r warning=FALSE}
+# All variables except outcome
+contin_vars <- cleaned_data %>%
+  select(-Outcome)
+
+# Correlation: outcome variable and other variables
+outcome_corr <- cor(cleaned_data$Outcome, contin_vars)
+print(outcome_corr)
+
+# Convert correlation matrix to a data frame
+corr_df <- as.data.frame(outcome_corr)
+
+# Obtain rownames
+corr_df$variable <- rownames(corr_df)
+
+# Reshape df for visualization
+updated_corr_df <- pivot_longer(corr_df, 
+                            cols = -variable,
+                            names_to = "variable_name",
+                            values_to = "correlation")
+
+# Collinearity with VIF
+col_model <- vif(lm(Outcome ~ ., data = cleaned_data))
+print(col_model)
+
+# Chi-squared Analysis
+chi_sq <- cleaned_data %>%
+  # Exclude outcome variable
+  select(-Outcome) %>%
+  # Apply to each variable against outcome variable
+  map(~chisq.test(.x, cleaned_data$Outcome))
+print(chi_sq)
+```
+
+After removing outliers from the dataset, correlation values were recalculated. While the correlation for BMI slightly declined, it still remains an important predictor of the target variable. To further assess multicollinearity among predictors, a **Variance Inflation Factor (VIF)** analysis was conducted. *High* VIF scores typically show collinearity concerns, with values exceeding 5–10 warranting closer inspection. Additionally, a **Chi-Square** test was performed to evaluate the association between each continuous predictor and the outcome variable. 
+
+> All predictors returned p-values below 2.2e-16, confirming a statistically significant relationship with the outcome.
+
+## Distribution Evaluation
+
+```{r}
+# Bar plot: outcome correlation vs other variables
+ggplot(updated_corr_df, aes(x = variable_name, y = correlation, fill = correlation)) +
+  # Bar plot
+  geom_bar(stat = "identity") +
+  # Update labels
+  labs(title = "Variable Correlation vs Diabetes Outcome (Outliers Removed)", 
+       x = "Variable", y = "Correlation") +
+  # Adjust x-axis text
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   scale_fill_gradient2(low = "skyblue", mid = "lightgreen", high = "darkgreen", midpoint = 0.3)
+```
+
+Re-evaluating the correlation after excluding outliers revealed only minor changes in the barplot. The top four variables (glucose, pregnancies, BMI, and age) remained the most strongly correlated with the outcome variable. Among them, BMI showed a slight drop in its correlation strength.
+
+* * *
+
+# Data Cleaning & Reshaping
+## Missing Values & Data Manipulation
+```{r}
+# Missing values
+missing_vals <- colSums(is.na(cleaned_data))
+print(missing_vals)
+```
+
+As displayed above, the dataset contains no missing values. With this confirmation, we can move forward to the next phase of data cleaning and reshaping to support accurate and consistent analysis.
+
+## Normalization/Standardization
+```{r}
+# Visualize how to impute missing values although there are none
+data_imputed <- cleaned_data %>%
+  mutate_all(~if_else(is.na(.), mean(., na.rm = TRUE), .))
+# Standardize with z-score scale()
+standardized_data <- scale(data_imputed)
+```
+
+To demonstrate how missing values would be handled, I used the **mutate_all()** function from the dplyr package to scan all columns for missing entries and impute them with their respective column means. After handling missing data, the dataset was standardized using the **scale()** function, which applies z-score normalization to ensure consistency across features.
+
+* * *
+
+# Feature Engineering
+```{r}
+# Create BMI categories
+featured_data <- data_imputed %>%
+  mutate(BMI_category = cut(BMI, 
+                            # Define breaks
+                            breaks = c(0, 18.5, 24.9, 29.9, Inf), 
+                            # Label breaks
+                            labels = c("Underweight", "Normal", "Overweight", "Obese"),
+                            # Include lowest value in first category
+                            include.lowest = TRUE))
+# Outcome as factor
+featured_data$Outcome <- as.factor(featured_data$Outcome)
+head(featured_data)
+
+# Visualize distribution across BMI categories
+ggplot(featured_data, aes(x = BMI_category, fill = BMI_category)) +
+  # Bar plot
+  geom_bar(color = "black") +
+  # Color Palette
+  scale_fill_brewer(palette = "RdYlBu") +
+  # Update labels
+  labs(title = "Distribution of Individuals Across BMI Categories", 
+       x = "BMI Category", y = "Count") +
+  # Theme
+  theme_minimal()
+
+# Visualize BMI category and outcome variable
+ggplot(featured_data, aes(x = BMI_category, fill = Outcome)) +
+  # Bar plot
+  geom_bar(position = "dodge", color = "black") +
+  # Color Palette
+  scale_fill_brewer(palette = "Set3") +
+  # Update labels
+  labs(title = "Distribution of Diabetes Outcome Across BMI Categories",
+       x = "BMI Category", y = "Count", fill = "Outcome") +
+  # Theme
+  theme_minimal()
+```
+
+A new variable, **BMI_category**, was introduced by grouping the continuous BMI values into four defined categories: "Underweight," "Normal," "Overweight," and "Obese." This transformation enhances the comprehension of the BMI metric and allows for clearer analysis of its relationship to diabetes risk.
+
+The first bar plot illustrates how individuals are distributed among these BMI categories, with the majority classified as **Obese**, followed by Overweight, Normal, and Underweight, in that order. The second bar plot depicts the prevalence of diabetes within each category, revealing a significantly higher incidence of diabetes among those in the Obese group compared to the others.
+
+## Dimensionality Reduction
+```{r}
+# Principal Component Analysis (PCA)
+pca <- prcomp(combined_data[, !names(combined_data) %in% "Outcome"], scale. = TRUE)
+
+# PCA Summary
+summary(pca)
+
+# Variances by each component 
+print(pca)
+```
+* * *
+
+# Model Constuction
+To predict whether someone has diabetes based on the dataset’s features, three machine learning models will be used:
+
+- Logistic Regression: A simple and effective method for yes/no outcomes. It works well for predicting diabetes by estimating the probability using a logistic curve.
+
+- Random Forest: This model builds many decision trees using the data and combines their results. It’s useful for identifying which features play the biggest role in predicting diabetes.
+
+- Support Vector Machine (SVM): Good for two-class problems since SVM finds the best dividing line between diabetic and non-diabetic cases.
+
+## Training/Validation Subsets
+```{r}
+# Split into training/validation sets - 70/30
+# Set seed
+set.seed(123)  
+# Index
+index <- createDataPartition(featured_data$Outcome, p = 0.7, list = FALSE)
+# Training set
+train_data <- featured_data[index, ]
+# validation set
+valid_data <- featured_data[-index, ]
+
+# Convert Outcome variable to a factor, 1 = YES, 0 = NO diabetes 
+train_data$Outcome <- factor(train_data$Outcome, levels = c(1, 0))
+valid_data$Outcome <- factor(valid_data$Outcome, levels = c(1, 0))
+```
+
+The dataset, which includes the new **BMI_category** feature, was split into two parts: 70% for training and 30% for testing.
+
+- Training set (70%): `r paste(dim(train_data))`
+- Validation set (30%): `r paste(dim(valid_data))`
+
+### Model A: Logistic Regression
+```{r}
+# Logistic Regression model
+model_A <- train(Outcome ~ ., data = train_data, method = "glm", family = "binomial")
+```
+
+### Model B: Random Forest
+```{r}
+# Random forest model
+model_B <- train(Outcome ~ ., data = train_data, method = "rf")
+```
+
+### Model C: Support Vector Machine
+```{r}
+# Support vector machine model
+model_C <- train(Outcome ~ ., data = train_data, method = "svmRadial")
+```
+
+* * *
+
+# Model Evaluation
+## Evaluation Metrics & Failure Analysis
+```{r}
+# Logistic Regression Confusion matrix
+log_conf <- confusionMatrix(predict(model_A, valid_data), valid_data$Outcome)
+print(log_conf)
+```
+
+The logistic regression model reached an accuracy of 75.45%. Here’s how it performed:
+
+- Sensitivity (found diabetic cases correctly): 62.94%
+
+  - 107 true positives
+
+  - 45 false positives
+
+- Specificity (correctly identified non-diabetics): 83.33%
+
+  - 225 true negatives
+
+  - 63 false negatives
+
+The model performs fairly well, but there's room to improve how well it identifies both positive and negative cases.
+
+```{r}
+# Random Forest Confusion matrix
+rand_conf <- confusionMatrix(predict(model_B, valid_data), valid_data$Outcome)
+print(rand_conf)
+```
+
+The Random Forest model delivered strong results with an accuracy of 95.68%. Here’s how it performed:
+
+- Sensitivity (correctly identified diabetics): 92.94%
+
+   - 158 true positives
+
+  - 7 false positives
+
+- Specificity (correctly identified non-diabetics): 97.41%
+
+  - 263 true negatives
+
+  - 12 false negatives
+
+This model showed excellent overall performance, with high accuracy, precision, and strong ability to detect both diabetic and non-diabetic individuals.
+
+
+
+```{r}
+# Support Vector Machine Confusion matrix
+cat("Support Vector Machine Confusion Matrix \n\n")
+vect_conf <- confusionMatrix(predict(model_C, valid_data), valid_data$Outcome)
+print(vect_conf)
+```
+
+The Support Vector Machine (SVM) model reached an accuracy of 80.68%. Its performance details include:
+
+- Sensitivity (correctly identified diabetics): 64.12%
+
+  - 109 true positives
+
+  - 24 false positives
+
+- Specificity (correctly identified non-diabetics): 91.11%
+
+  - 246 true negatives
+
+  - 61 false negatives
+
+While the SVM model performed well overall, especially in identifying non-diabetic cases, there is room to improve its ability to correctly catch more diabetic cases.
+
+```{r}
+# Extract metrics from Logistic regression model
+ma_metrics <- model_A$results 
+print(ma_metrics)
+# Extract metrics from random forest model
+mb_metrics <- model_B$results 
+print(mb_metrics)
+# Extract metrics from support vector machine model
+mc_metrics <- model_C$results 
+print(mc_metrics)
+```
+
+The following evaluation metrics for each model is defined. 
+
+- Logistic Regression
+  - Accuracy = `r paste(round(ma_metrics[1,2] * 100, 2))`%
+  - Kappa = `r paste(round(ma_metrics[1,3], 2))`
+  - Accuracy Standard Deviation: `r paste(round(ma_metrics[1,4], 2))`
+  - Kappa Standard Deviation: `r paste(round(ma_metrics[1,5], 2))`
+  
+  
+- Random Forest
+  - Predictors sampled at each split: 2
+    - Accuracy = `r paste(round(mb_metrics[1,2] * 100, 2))`%
+    - Kappa = `r paste(round(mb_metrics[1,3], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mb_metrics[1,4], 2))`
+    - Kappa Standard Deviation: `r paste(round(mb_metrics[1,5], 2))`
+    
+  - Predictors sampled at each split: 6
+    - Accuracy = `r paste(round(mb_metrics[2,2] * 100, 2))`%
+    - Kappa = `r paste(round(mb_metrics[2,3], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mb_metrics[2,4], 2))`
+    - Kappa Standard Deviation: `r paste(round(mb_metrics[2,5], 2))`
+    
+  - Predictors sampled at each split: 11
+    - Accuracy = `r paste(round(mb_metrics[3,2] * 100, 2))`%
+    - Kappa = `r paste(round(mb_metrics[3,3], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mb_metrics[3,4], 2))`
+    - Kappa Standard Deviation: `r paste(round(mb_metrics[3,5], 2))`
+    
+    
+- Support Vector Machine
+  - Best sigma: `r paste(round(mc_metrics[1,1], 4))`
+  - Cost parameter: `r paste(mc_metrics[1,2])`
+    - Accuracy = `r paste(round(mc_metrics[1,3] * 100, 2))`%
+    - Kappa = `r paste(round(mc_metrics[1,4], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mc_metrics[1,5], 2))`
+    - Kappa Standard Deviation: `r paste(round(mc_metrics[1,6], 2))`
+    
+  - Cost parameter: `r paste(mc_metrics[2,2])`
+    - Accuracy = `r paste(round(mc_metrics[2,3] * 100, 2))`%
+    - Kappa = `r paste(round(mc_metrics[2,4], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mc_metrics[2,5], 2))`
+    - Kappa Standard Deviation: `r paste(round(mc_metrics[2,6], 2))`
+    
+  - Cost parameter: `r paste(mc_metrics[3,2])`
+    - Accuracy = `r paste(round(mc_metrics[3,3] * 100, 2))`%
+    - Kappa = `r paste(round(mc_metrics[3,4], 2))`
+    - Accuracy Standard Deviation: `r paste(round(mc_metrics[3,5], 2))`
+    - Kappa Standard Deviation: `r paste(round(mc_metrics[3,6], 2))`
+
+## Holdout Method Evaluation
+```{r}
+# Extract logistic regression models performance data
+lin_accuracy <- log_conf$overall["Accuracy"] * 100
+lin_precision <- log_conf$byClass["Pos Pred Value"]
+lin_recall <- log_conf$byClass["Sensitivity"]
+lin_f1 <- log_conf$byClass["F1"]
+
+# Results
+cat("Holdout Method Evaluation for Logistic Regression Model", "\n")
+cat("Logistic Regression Accuracy:", round(lin_accuracy, 2), "\n")
+cat("Logistic Regression Precision:", round(lin_precision, 4), "\n")
+cat("Logistic Regression Recall:", round(lin_recall, 4), "\n")
+cat("Logistic Regression F1 Score:", round(lin_f1, 4), "\n\n")
+
+
+
+# Extract Random Forest models performance data
+rand_accuracy <- rand_conf$overall["Accuracy"] * 100
+rand_precision <- rand_conf$byClass["Pos Pred Value"]
+rand_recall <- rand_conf$byClass["Sensitivity"]
+rand_f1 <- rand_conf$byClass["F1"]
+
+# Results
+cat("Holdout Method Evaluation for Random Forest Model", "\n")
+cat("Random Forest Accuracy:", round(rand_accuracy, 2), "\n")
+cat("Random Forest Precision:", round(rand_precision, 4), "\n")
+cat("Random Forest Recall:", round(rand_recall, 4), "\n")
+cat("Random Forest F1 Score:", round(rand_f1, 4), "\n\n")
+
+
+# Extract Support Vector Machine models performance data
+vect_accuracy <- vect_conf$overall["Accuracy"] * 100
+vect_precision <- vect_conf$byClass["Pos Pred Value"]
+vect_recall <- vect_conf$byClass["Sensitivity"]
+vect_f1 <- vect_conf$byClass["F1"]
+
+# Results
+cat("Holdout Method Evaluation for Support Vector Machine Model", "\n")
+cat("Support Vector Machine Accuracy:", round(vect_accuracy, 2), "\n")
+cat("Support Vector Machine Precision:", round(vect_precision, 4), "\n")
+cat("Support Vector Machine Recall:", round(vect_recall, 4), "\n")
+cat("Support Vector Machine F1 Score:", round(vect_f1, 4), "\n")
+```
+
+Based on the evaluations, the **Random Forest model** stands out with the best performance across all key metrics: **accuracy**, **precision**, **recall**, and **F1 score**. It consistently identifies both diabetic and non-diabetic individuals more effectively than the others. While **Logistic Regression** provides decent results, it falls short compared to the Random Forest model. **Support Vector Machine** performs slightly better than Logistic Regression but still lags behind Random Forest. Overall, **Random Forest** is the most reliable and accurate model for this classification task.
+
+## K-Fold Cross-Validation Evaluation
+
+```{r warning=FALSE}
+# Define control parameters
+ctrl <- trainControl(method = "cv", number = 5)
+
+# Train the logistic regression model with cross-validation
+modelA_k <- train(Outcome ~ ., data = train_data, method = "glm", 
+                  family = "binomial", trControl = ctrl)
+
+# Train the random forest model with cross-validation
+modelB_k <- train(Outcome ~ ., data = train_data, method = "rf", trControl = ctrl)
+
+# Train the support vector machine model with cross-validation
+modelC_k <- train(Outcome ~ ., data = train_data, method = "svmRadial", trControl = ctrl)
+
+# Summarize the results
+summary(modelA_k)
+summary(modelB_k)
+summary(modelC_k)
+```
+* * *
+
+# Comparing Models
+
+When comparing accuracy, the **Random Forest** model outperformed both the **Support Vector Machine** and **Logistic Regression** models. It also achieved the highest sensitivity, meaning it was the best at correctly identifying diabetic individuals.
+
+In terms of specificity (correctly identifying non-diabetics), both SVM and Random Forest scored high, while Logistic Regression showed the lowest specificity.
+Thanks to its high scores in both sensitivity and specificity, the Random Forest model also had the strongest precision.
+
+> Overall, Random Forest delivered the best results across all metrics. 
+
+The **SVM** model showed strong *precision* and *sensitivity*, but its accuracy could be improved. Though Logistic Regression had the lowest overall performance, it still offers useful insights into which features are important for diabetes prediction.
+
+* * *
+
+# Model Tuning & Performance Improvement
+## Model Tuning/Complexity/Bagging
+```{r warning=FALSE}
+# Hyperparameter tuning grid - logistic regression
+param_A <- expand.grid(
+  # Grid for alpha
+  alpha = seq(0, 1, by = 0.1), 
+  # Grid for lambda
+  lambda = seq(0, 1, by = 0.1))  
+
+
+# Train the logistic regression model with hyperparameter tuning
+tuned_modelA <- train(Outcome ~ ., data = train_data, method = "glmnet", 
+                      trControl = ctrl,tuneGrid = param_A)
+
+# Hyperparameter tuning grid - random forest
+param_B <- expand.grid(
+  # Grid for mtry
+  mtry = c(2, 4, 6)           
+)
+
+# Train the random forest model with hyperparameter tuning
+tuned_modelB <- train(Outcome ~ ., data = train_data, method = "rf", 
+                      trControl = ctrl,tuneGrid = param_B)
+
+# Hyperparameter tuning grid - support vector machine
+param_C <- expand.grid(
+  # Grid for sigma
+  sigma = c(0.1, 0.5, 1), 
+  # Grid for C
+  C = c(0.25, 0.5, 1)        
+)
+
+# Train the support vector machine model with hyperparameter tuning
+tuned_modelC <- train(Outcome ~ ., data = train_data, method = "svmRadial", 
+                      trControl = ctrl,tuneGrid = param_C)
+```
+
+```{r}
+# Control parameters for bagging
+ctrl_bagging <- trainControl(
+  # Repeated cross-validation
+  method = "repeatedcv",    
+  # Folds
+  number = 5,   
+  # Repeats
+  repeats = 3,   
+  # Search method
+  search = "grid"            
+)
+
+# Logistic regression model with bagging
+bagging_MA <- train(Outcome ~ ., data = train_data, method = "glm", trControl = ctrl_bagging)
+
+# Random forest model with bagging
+bagging_MB <- train(Outcome ~ ., data = train_data, method = "rf", trControl = ctrl_bagging)
+
+# Support vector machine model with bagging
+bagging_MC <- train(Outcome ~ ., data = train_data, method = "svmRadial", trControl = ctrl_bagging)
+```
+
+### Heterogeneous Ensemble
+```{r}
+# Function to create an ensemble model
+create_ensemble <- function(models, data) {
+  # Predictions for each model
+  predictions <- lapply(models, function(model) predict(model, newdata = data))
+  
+  # Combine predictions with simple majority 
+  ensemble_prediction <- rowSums(do.call(cbind, predictions)) > (length(models) / 2)
+  
+  # Binary output
+  ensemble_prediction <- as.numeric(ensemble_prediction)
+  
+  # Return prediction
+  return(ensemble_prediction)
+}
+
+# Models
+ensemble_models <- list(tuned_modelA, tuned_modelB, tuned_modelC, bagging_MA, bagging_MB, bagging_MC)
+
+# Create the ensemble model
+ensemble_prediction <- create_ensemble(ensemble_models, featured_data)
+
+# Evaluate the ensemble model
+ensemble_accuracy <- (sum(ensemble_prediction == featured_data$Outcome) / nrow(featured_data)) * 100
+print(round(ensemble_accuracy, 2))
+```
+
+### Ensemble Application
+```{r}
+# Apply the ensemble model to make predictions on valid data
+ensemble_prediction <- create_ensemble(ensemble_models, valid_data)
+
+# View head of prediction
+head(ensemble_prediction)
+
+# Evaluate ensemble model
+ensemble_accuracy <- (sum(ensemble_prediction == valid_data$Outcome) / nrow(valid_data)) * 100
+print(round(ensemble_accuracy, 2))
+```
+* * *
+
+# Comparing Ensemble & Models
+
+```{r}
+# Graph the models performances
+# Create list of data
+models <- c("Logistic Regression", "Random Forest", "SVM", "Ensemble")
+accuracy <- c(round(lin_accuracy, 2), 
+              round(rand_accuracy, 2), 
+              round(vect_accuracy, 2), 
+              round(ensemble_accuracy, 2))
+# Create data frame with model & accuracy values
+accuracy_df <- data.frame(Model = models, Accuracy = accuracy)
+# Print data frame
+print(accuracy_df)
+
+# Comparison bar plot
+ggplot(accuracy_df, aes(x = Model, y = Accuracy, fill = Accuracy)) +
+  # Bar plot
+  geom_bar(stat = "identity") +
+  # Update labels
+  labs(title = "Model Accuracy Comparison",
+       x = "Model", y = "Accuracy") +
+  # Theme
+  theme_minimal() +
+  # Adjust x axis text
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+   scale_fill_gradient2(low = "skyblue", mid = "orange", high = "darkblue", midpoint = 70)
+```
+
+
+Interestingly, the **ensemble** model **underperformed** significantly, with an accuracy of only `r paste(round(ensemble_accuracy, 2))`%, compared to:
+
+- Logistic Regression model's accuracy: `r paste(round(lin_accuracy,2))`%
+- Random Forest model's accuracy: `r paste(round(rand_accuracy,2))`%
+- Support Vector Machine model's accuracy: `r paste(round(vect_accuracy, 2))`%
+
+The ensemble model’s performance was less than half that of Logistic Regression, suggesting that combining the models actually weakened their individual predictive power.
+
+Even though each model did well on its own, the ensemble approach was not effective for this dataset and did not enhance prediction accuracy.
+
+
+
